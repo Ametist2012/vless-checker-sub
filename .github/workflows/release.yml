@@ -1,0 +1,40 @@
+# Релиз: git tag v1.0.0 && git push origin v1.0.0
+# Собирает архивы под linux-x64 и linux-arm64 и публикует их в GitHub Releases вместе с install.sh,
+# в котором уже указан этот репозиторий.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Сборка архивов
+        run: |
+          ./deploy/package.sh linux-x64 "$GITHUB_REF_NAME"
+          ./deploy/package.sh linux-arm64 "$GITHUB_REF_NAME"
+          sed "s|OWNER/REPO}|$GITHUB_REPOSITORY}|" install.sh > dist/install.sh
+
+      - name: Публикация релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes \
+            dist/vlesscheck-linux-x64.tar.gz dist/vlesscheck-linux-arm64.tar.gz dist/install.sh

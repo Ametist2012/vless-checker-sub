@@ -12,21 +12,11 @@ public sealed partial class Store
     [GeneratedRegex("^[a-z0-9_-]{1,32}$")]
     public static partial Regex GroupName();
 
+    // свежая установка: две пустые группы, источники добавляются в панели
     static readonly (string Name, string Title, string[] Urls)[] DefaultGroups =
     [
-        ("white", "🏳️ Белые списки",
-        [
-            "https://raw.githubusercontent.com/GoldCaviar/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-SNI-RU-all.txt",
-        ]),
-        ("black", "🏴 Чёрные списки",
-        [
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt",
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_SS+All_RUS.txt",
-        ]),
+        ("white", "🏳️ Белые списки", []),
+        ("black", "🏴 Чёрные списки", []),
     ];
 
     readonly string _connectionString;

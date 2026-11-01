@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Сборка и выкладка на VPS: ./deploy/deploy.sh
+# Выкладка из исходников на свой сервер: ./deploy/deploy.sh
+# Собирает тот же архив, что и релиз (package.sh), и ставит его на сервер тем же install.sh.
 # Параметры сервера — в deploy/deploy.env (образец: deploy.env.example; в git не попадает).
-# Данные (/opt/vlesscheck/data) не трогаются; настройка сервера (setup-server.sh) выполняется при каждой выкладке.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -10,43 +10,17 @@ ENV_FILE="$ROOT/deploy/deploy.env"
 # shellcheck source=deploy.env.example
 source "$ENV_FILE"
 HOST=${SSH_HOST:?укажите SSH_HOST в deploy.env}
-OUT="$ROOT/.publish"
 
-echo "== сборка панели"
-(cd "$ROOT/web" && npm ci --silent && npm run build --silent)
+case $(ssh "$HOST" uname -m) in
+    x86_64) RID=linux-x64 ;;
+    aarch64 | arm64) RID=linux-arm64 ;;
+    *) echo "архитектура сервера не поддерживается" >&2; exit 1 ;;
+esac
 
-echo "== сборка сервисов под linux-x64"
-rm -rf "$OUT"
-for app in Api Checker; do
-    dotnet publish "$ROOT/src/VlessCheck.$app" -c Release -r linux-x64 --self-contained true \
-        -p:DebugType=none -o "$OUT/$(echo $app | tr '[:upper:]' '[:lower:]')" -nologo -v q
-done
+"$ROOT/deploy/package.sh" "$RID" "dev-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo local)"
 
 echo "== выкладка на $HOST"
-ssh "$HOST" 'mkdir -p /tmp/vlesscheck-deploy /opt/vlesscheck'
-scp -q "$ROOT"/deploy/{setup-server.sh,nginx-vlesscheck.conf.template,vlesscheck-api.service,vlesscheck-checker.service,v-chk} \
-    "$ENV_FILE" "$HOST:/tmp/vlesscheck-deploy/"
-for app in api checker; do
-    rsync -a --delete "$OUT/$app/" "$HOST:/opt/vlesscheck/$app.new/"
-done
-# сначала останавливаем старую версию и только потом меняем nginx: доступ к панели не должен открыться
-# ни на секунду, пока работает версия без нужной защиты (во время выкладки панель отвечает 502)
-ssh "$HOST" 'set -e
-    # если что-то упадёт до запуска новой версии — поднимаем ту, что была, сервис не должен остаться выключенным
-    trap "echo \"выкладка не удалась — запускаю прежнюю версию\" >&2; systemctl start vlesscheck-api vlesscheck-checker" ERR
-    systemctl stop vlesscheck-api vlesscheck-checker 2>/dev/null || true
-    bash /tmp/vlesscheck-deploy/setup-server.sh
-    for app in api checker; do
-        rm -rf /opt/vlesscheck/$app.old
-        [ -d /opt/vlesscheck/$app ] && mv /opt/vlesscheck/$app /opt/vlesscheck/$app.old
-        mv /opt/vlesscheck/$app.new /opt/vlesscheck/$app
-    done
-    chown -R root:root /opt/vlesscheck/api /opt/vlesscheck/checker
-    systemctl enable --now vlesscheck-api vlesscheck-checker
-    sleep 3
-    systemctl --no-pager --lines=0 status vlesscheck-api vlesscheck-checker | grep -E "●|Active|Memory"
-    rm -rf /tmp/vlesscheck-deploy'
-secret=$(ssh "$HOST" "python3 -c \"import sqlite3,json; print(json.loads(sqlite3.connect('/opt/vlesscheck/data/vlesscheck.db').execute('select value from kv where key=?', ('settings',)).fetchone()[0])['panel_path'])\"")
-echo "== готово"
-echo "панель:  ${SITE_URL:-https://<ваш-сайт>}/${PANEL_PREFIX:-checker}/$secret/"
-echo "логин, пароль, состояние — меню на сервере: ssh $HOST, затем v-chk"
+scp -q "$ROOT/dist/vlesscheck-$RID.tar.gz" "$ROOT/install.sh" "$HOST:/tmp/"
+ssh "$HOST" "SITE_URL=$(printf %q "${SITE_URL:-}") NGINX_SITE_CONF=$(printf %q "${NGINX_SITE_CONF:-}") \
+    PANEL_PREFIX=$(printf %q "${PANEL_PREFIX:-checker}") LEGACY_SUB_PREFIX=$(printf %q "${LEGACY_SUB_PREFIX:-}") \
+    bash /tmp/install.sh --archive /tmp/vlesscheck-$RID.tar.gz; rc=\$?; rm -f /tmp/install.sh /tmp/vlesscheck-$RID.tar.gz; exit \$rc"

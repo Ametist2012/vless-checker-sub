@@ -121,6 +121,11 @@ public sealed class GroupChecker(Store store, Group group, Settings t, Progress 
     {
         var started = Now();
         Directory.CreateDirectory(_dir);
+        if (group.Subscriptions.Count == 0)
+        {
+            log.LogInformation("[{Group}] нет источников — добавьте подписки в панели", group.Name);
+            return;
+        }
         Stage("загрузка подписок");
 
         string? ownIp;

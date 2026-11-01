@@ -2,6 +2,7 @@
 bin/
 obj/
 .publish/
+dist/
 node_modules/
 src/VlessCheck.Api/wwwroot/
 
