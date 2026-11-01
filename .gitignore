@@ -1,0 +1,17 @@
+# сборка
+bin/
+obj/
+.publish/
+node_modules/
+src/VlessCheck.Api/wwwroot/
+
+# локальные данные и настройки сервера
+data/
+*.db
+*.db-shm
+*.db-wal
+deploy/deploy.env
+
+.DS_Store
+.idea/
+.vscode/

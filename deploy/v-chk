@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# v-chk — меню VLESS Checker на сервере: адрес панели, логин и пароль, состояние, перезапуск, лог.
+# Ставится в /usr/local/bin/v-chk скриптом setup-server.sh. Запуск: sudo v-chk
+set -uo pipefail
+
+DB=/opt/vlesscheck/data/vlesscheck.db
+SITE_ENV=/opt/vlesscheck/site.env
+PASS_FILE=/root/vlesscheck-admin-password.txt
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Запустите от root: sudo v-chk" >&2
+    exit 1
+fi
+[[ -f $DB ]] || { echo "База $DB не найдена — сервис ещё не запускался?" >&2; exit 1; }
+# shellcheck disable=SC1090
+[[ -f $SITE_ENV ]] && source "$SITE_ENV"
+
+bold=$'\e[1m' dim=$'\e[2m' green=$'\e[32m' red=$'\e[31m' reset=$'\e[0m'
+
+# Вся работа с базой — в Python (он есть в Ubuntu): sqlite3 и PBKDF2 из стандартной библиотеки.
+py() {
+    python3 - "$DB" "$@" <<'PY'
+import base64, hashlib, json, os, secrets, sqlite3, sys
+db = sqlite3.connect(sys.argv[1], timeout=10)
+cmd, args = sys.argv[2], sys.argv[3:]
+
+def kv(key):
+    row = db.execute("select value from kv where key=?", (key,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+if cmd == "panel_path":
+    print(kv("settings")["panel_path"])
+elif cmd == "login":
+    print((kv("auth") or {}).get("login", "admin"))
+elif cmd == "check_password":   # совпадает ли пароль с текущим хешем — тем же алгоритмом, что и в приложении
+    a = kv("auth")
+    ok = a and secrets.compare_digest(
+        hashlib.pbkdf2_hmac("sha256", args[0].encode(), base64.b64decode(a["salt"]), a["iterations"], 32),
+        base64.b64decode(a["hash"]))
+    sys.exit(0 if ok else 1)
+elif cmd == "set_password":     # новый пароль + новый ключ сессий: все устройства выйдут из панели
+    login, password = args
+    salt, it = os.urandom(16), 210_000
+    auth = {"login": login, "salt": base64.b64encode(salt).decode(), "iterations": it,
+            "hash": base64.b64encode(hashlib.pbkdf2_hmac("sha256", password.encode(), salt, it, 32)).decode()}
+    with db:
+        db.execute("insert or replace into kv values ('auth', ?)", (json.dumps(auth),))
+        db.execute("insert or replace into kv values ('session_secret', ?)", (base64.b64encode(os.urandom(32)).decode(),))
+elif cmd == "groups":
+    for name, title in db.execute("select name, title from groups order by position, name"):
+        try:
+            s = json.load(open(f"/opt/vlesscheck/data/groups/{name}/status.json"))
+            print(f"  {title}: в подписке {s.get('selected', 0)} из {s.get('working', 0)} рабочих")
+        except OSError:
+            print(f"  {title}: ещё не проверялась")
+    print(f"  Сервис в панели: {'включён' if kv('settings').get('enabled', True) else 'ВЫКЛЮЧЕН'}")
+PY
+}
+
+panel_url() {
+    local site=${SITE_URL:-https://<ваш-сайт>} prefix=${PANEL_PREFIX:-checker}
+    echo "${site%/}/$prefix/$(py panel_path)/"
+}
+
+initial_password() { [[ -f $PASS_FILE ]] && sed -n 's/^password: //p' "$PASS_FILE"; }
+
+show_url() {
+    echo
+    echo "  Адрес панели: ${bold}$(panel_url)${reset}"
+    echo "  ${dim}Сменить его можно в панели: Настройки → «Адрес панели».${reset}"
+}
+
+show_credentials() {
+    local login pass
+    login=$(py login)
+    pass=$(initial_password)
+    echo
+    echo "  Логин:  ${bold}$login${reset}"
+    if [[ -n $pass ]] && py check_password "$pass"; then
+        echo "  Пароль: ${bold}$pass${reset}"
+        echo "  ${dim}Это начальный пароль. Сменить: в панели «Настройки → Вход в панель» или здесь, пункт 3.${reset}"
+    else
+        echo "  Пароль: ${dim}был изменён в панели — показать нельзя, хранится только его хеш.${reset}"
+        echo "  ${dim}Забыли? Пункт 3 — сбросить пароль.${reset}"
+    fi
+}
+
+reset_password() {
+    local login pass answer
+    login=$(py login)
+    echo
+    read -r -p "  Сбросить пароль для «$login»? Все устройства выйдут из панели. [y/N] " answer
+    [[ $answer =~ ^[YyДд]$ ]] || { echo "  Отменено."; return; }
+    pass=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)
+    py set_password "$login" "$pass"
+    printf 'login: %s\npassword: %s\n' "$login" "$pass" > "$PASS_FILE"
+    chmod 600 "$PASS_FILE"
+    echo "  ${green}Готово.${reset} Логин: ${bold}$login${reset}  Пароль: ${bold}$pass${reset}"
+}
+
+show_status() {
+    echo
+    for svc in vlesscheck-api vlesscheck-checker; do
+        local state mem
+        state=$(systemctl is-active "$svc")
+        mem=$(systemctl show "$svc" -p MemoryCurrent --value)
+        [[ $mem =~ ^[0-9]+$ ]] && mem="$((mem / 1024 / 1024)) МБ" || mem="—"
+        if [[ $state == active ]]; then
+            echo "  ${green}●${reset} $svc — работает, память $mem"
+        else
+            echo "  ${red}●${reset} $svc — $state"
+        fi
+    done
+    py groups
+}
+
+restart() {
+    echo
+    systemctl restart vlesscheck-api vlesscheck-checker && echo "  ${green}Перезапущено.${reset}"
+    sleep 2
+    show_status
+}
+
+show_log() {
+    echo
+    journalctl -u vlesscheck-checker -u vlesscheck-api -n 30 --no-pager -o cat | grep -v "проверено " | tail -20 | sed 's/^/  /'
+}
+
+while true; do
+    echo
+    echo "${bold}VLESS Checker${reset}"
+    echo "  1) Адрес панели"
+    echo "  2) Логин и пароль"
+    echo "  3) Сбросить пароль"
+    echo "  4) Состояние сервисов"
+    echo "  5) Перезапустить сервисы"
+    echo "  6) Последние записи лога"
+    echo "  0) Выход"
+    read -r -p "Выберите пункт: " choice || exit 0
+    case $choice in
+        1) show_url ;;
+        2) show_url; show_credentials ;;
+        3) reset_password ;;
+        4) show_status ;;
+        5) restart ;;
+        6) show_log ;;
+        0 | q | "") exit 0 ;;
+        *) echo "  Нет такого пункта." ;;
+    esac
+done

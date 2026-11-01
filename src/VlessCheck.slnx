@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="VlessCheck.Api/VlessCheck.Api.csproj" />
+  <Project Path="VlessCheck.Checker/VlessCheck.Checker.csproj" />
+  <Project Path="VlessCheck.Core/VlessCheck.Core.csproj" />
+</Solution>

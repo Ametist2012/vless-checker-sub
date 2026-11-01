@@ -1,0 +1,32 @@
+[Unit]
+Description=VLESS Checker — проверка конфигов
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=vlesscheck
+Group=vlesscheck
+WorkingDirectory=/opt/vlesscheck/checker
+ExecStart=/opt/vlesscheck/checker/VlessCheck.Checker
+Environment=VLESSCHECK_DATA=/opt/vlesscheck/data
+Environment=HOME=/opt/vlesscheck/data
+Environment=VLESSCHECK_XRAY=/opt/vlesscheck/bin/xray
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Restart=always
+RestartSec=10
+
+# лимиты: при нехватке памяти ядро прибьёт проверку (вместе с её xray), а не ваш VPN
+MemoryHigh=250M
+MemoryMax=300M
+CPUWeight=20
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/vlesscheck/data
+
+[Install]
+WantedBy=multi-user.target

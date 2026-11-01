@@ -1,0 +1,15 @@
+# VLESS Checker. Подключается строкой include в server { listen 443 } домена.
+# Шаблон: __PREFIX__ заменяется на PANEL_PREFIX из deploy.env. Всё под /__PREFIX__/ уходит в приложение без префикса:
+#   /__PREFIX__/sub/<токен>/<группа>  — подписки (по секретному токену);
+#   /__PREFIX__/<секрет панели>/      — панель со страницей входа (секрет меняется в настройках без перезагрузки nginx);
+#   остальное                         — 404.
+
+location ^~ /__PREFIX__/ {
+    proxy_pass http://127.0.0.1:8787/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;          # для защиты входа от перебора
+    proxy_set_header X-Forwarded-Proto $scheme;       # cookie сессии ставится с флагом Secure
+    proxy_read_timeout 60s;
+    client_max_body_size 1m;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+}
