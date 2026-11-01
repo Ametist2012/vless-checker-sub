@@ -57,11 +57,19 @@
 
 ## Установка на сервер
 
-Одной командой на сервере (Ubuntu/Debian с systemd, от root):
+Одной командой на сервере (Ubuntu/Debian с systemd, от root). Репозиторий приватный, поэтому нужен GitHub-токен
+на чтение: Settings → Developer settings → Fine-grained tokens, доступ только к `vless-checker-sub`,
+право **Contents: Read-only**.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh)
+export GITHUB_TOKEN=github_pat_…
 ```
+
+```bash
+bash <(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/Ametist2012/vless-checker-sub/main/install.sh)
+```
+
+Токен нужен только на время установки или обновления, на сервере он не сохраняется.
 
 Установщик скачивает готовую сборку из GitHub Releases (x64 или arm64, .NET на сервере не нужен) и спрашивает,
 куда подключить панель:

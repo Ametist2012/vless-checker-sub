@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # Установщик VLESS Checker.
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh)            установка или обновление
-#   bash <(curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh) uninstall  удаление
+# Репозиторий приватный, поэтому нужен GitHub-токен с доступом на чтение (fine-grained: Contents — Read-only):
+#
+#   export GITHUB_TOKEN=github_pat_…
+#   bash <(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+#       https://raw.githubusercontent.com/Ametist2012/vless-checker-sub/main/install.sh)              установка или обновление
+#   … тот же запуск с аргументом uninstall                                                            удаление
 #
 # Ключи: --version v1.2.3 (по умолчанию — последний релиз), --archive файл.tar.gz (поставить из локального архива).
+# Если репозиторий станет публичным, токен не нужен.
 # Без вопросов (для автоматизации) — задайте SITE_URL, NGINX_SITE_CONF, PANEL_PREFIX в окружении.
 # Повторный запуск обновляет сервис: данные в /opt/vlesscheck/data и настройки установки сохраняются.
 set -euo pipefail
 
-REPO=${VLESSCHECK_REPO:-OWNER/REPO}   # ← после публикации на GitHub впишите сюда «владелец/репозиторий»
+REPO=${VLESSCHECK_REPO:-Ametist2012/vless-checker-sub}
+GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
 APP=/opt/vlesscheck
 SITE_ENV=$APP/site.env
@@ -153,15 +159,30 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 if [[ -n $archive ]]; then
     cp "$archive" "$work/app.tar.gz"
+elif [[ -n $GITHUB_TOKEN ]]; then
+    # приватный репозиторий: файлы релиза отдаёт только API GitHub, по id файла и с токеном
+    api="https://api.github.com/repos/$REPO/releases/$([[ $version == latest ]] && echo latest || echo "tags/$version")"
+    say "Ищу релиз ${version} в $REPO"
+    curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$api" -o "$work/release.json" \
+        || die "релиз не найден или у токена нет доступа к $REPO (нужно право Contents: Read-only)"
+    asset=$(python3 -c "
+import json, sys
+release = json.load(open(sys.argv[1]))
+print(next((a['url'] for a in release.get('assets', []) if a['name'] == sys.argv[2]), ''))
+" "$work/release.json" "vlesscheck-$rid.tar.gz")
+    [[ -n $asset ]] || die "в релизе нет файла vlesscheck-$rid.tar.gz"
+    say "Скачиваю vlesscheck-$rid.tar.gz"
+    curl -fL --progress-bar -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/octet-stream" \
+        -o "$work/app.tar.gz" "$asset" || die "не удалось скачать релиз"
 else
-    [[ $REPO != OWNER/REPO ]] || die "в install.sh не указан репозиторий (переменная REPO или VLESSCHECK_REPO)"
     if [[ $version == latest ]]; then
         url="https://github.com/$REPO/releases/latest/download/vlesscheck-$rid.tar.gz"
     else
         url="https://github.com/$REPO/releases/download/$version/vlesscheck-$rid.tar.gz"
     fi
     say "Скачиваю $url"
-    curl -fL --progress-bar -o "$work/app.tar.gz" "$url" || die "не удалось скачать релиз"
+    curl -fL --progress-bar -o "$work/app.tar.gz" "$url" \
+        || die "не удалось скачать релиз. Если репозиторий приватный — задайте GITHUB_TOKEN (см. начало install.sh)"
 fi
 tar -C "$work" -xzf "$work/app.tar.gz"
 pkg="$work/vlesscheck-$rid"

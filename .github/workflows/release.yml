@@ -1,6 +1,5 @@
 # Релиз: git tag v1.0.0 && git push origin v1.0.0
-# Собирает архивы под linux-x64 и linux-arm64 и публикует их в GitHub Releases вместе с install.sh,
-# в котором уже указан этот репозиторий.
+# Собирает архивы под linux-x64 и linux-arm64 и публикует их в GitHub Releases вместе с install.sh.
 name: release
 
 on:
@@ -30,7 +29,7 @@ jobs:
         run: |
           ./deploy/package.sh linux-x64 "$GITHUB_REF_NAME"
           ./deploy/package.sh linux-arm64 "$GITHUB_REF_NAME"
-          sed "s|OWNER/REPO}|$GITHUB_REPOSITORY}|" install.sh > dist/install.sh
+          cp install.sh dist/install.sh
 
       - name: Публикация релиза
         env:
